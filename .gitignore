@@ -1,0 +1,11 @@
+/target/
+/release/
+**/*.rs.bk
+*.exe
+*.pdb
+*.log
+*.log.old
+config.json
+portable.flag
+Thumbs.db
+.DS_Store
