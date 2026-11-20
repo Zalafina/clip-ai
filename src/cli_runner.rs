@@ -251,6 +251,7 @@ enum AttemptError {
 
 struct PreparedInvocation {
     args: Vec<String>,
+    env_vars: Vec<(&'static str, &'static str)>,
     stdin_payload: Option<String>,
     output_file: Option<PathBuf>,
 }
@@ -294,6 +295,9 @@ fn execute_single(
         } else {
             Stdio::null()
         });
+    for &(k, v) in &prep.env_vars {
+        cmd.env(k, v);
+    }
 
     let mut child = cmd
         .spawn()
@@ -482,12 +486,14 @@ fn build_invocation(
             }
             args.extend(split_extra_args(&profile.extra_args));
 
+            let agy_env = vec![("AGY_CLI_DISABLE_AUTO_UPDATE", "true")];
             let utf16_len: usize = combined_prompt.encode_utf16().count();
             if utf16_len <= AGY_INLINE_MAX_UTF16 {
                 args.push("--output-format=json".to_string());
                 args.push(format!("-p={combined_prompt}"));
                 Ok(PreparedInvocation {
                     args,
+                    env_vars: agy_env,
                     stdin_payload: None,
                     output_file: None,
                 })
@@ -504,6 +510,7 @@ fn build_invocation(
                     + "\n";
                 Ok(PreparedInvocation {
                     args,
+                    env_vars: agy_env,
                     stdin_payload: Some(ndjson),
                     output_file: None,
                 })
@@ -565,6 +572,7 @@ fn build_invocation(
 
             Ok(PreparedInvocation {
                 args,
+                env_vars: Vec::new(),
                 stdin_payload: Some(combined_prompt),
                 output_file: Some(out_file),
             })
@@ -610,6 +618,7 @@ fn build_invocation(
 
             Ok(PreparedInvocation {
                 args,
+                env_vars: Vec::new(),
                 stdin_payload: Some(wrapped_user_prompt),
                 output_file: None,
             })
@@ -636,6 +645,7 @@ fn build_invocation(
             };
             Ok(PreparedInvocation {
                 args,
+                env_vars: Vec::new(),
                 stdin_payload,
                 output_file: None,
             })
@@ -645,7 +655,7 @@ fn build_invocation(
 
 fn ensure_agy_qa_settings_file(sandbox_dir: &Path) -> Result<PathBuf, String> {
     let path = sandbox_dir.join("agy_qa_settings.json");
-    let content = r#"{"permissions":{"deny":["command(*)","write_file(*)","edit_file(*)","read_file(*)","mcp(*)"]}}"#;
+    let content = r#"{"permissions":{"deny":["command(*)","write_file(*)","read_file(*)","mcp(*)"]}}"#;
     fs::write(&path, content)
         .map_err(|e| format!("无法写入 agy 安全配置 {}: {e}", path.display()))?;
     Ok(path)
@@ -1092,6 +1102,11 @@ mod tests {
         assert!(agy_prep.args.contains(&"--sandbox".to_string()));
         assert!(agy_prep.args.iter().any(|a| a.starts_with("--settings=")));
         assert!(agy_prep.args.iter().any(|a| a.contains("<input>")));
+        assert!(agy_prep
+            .env_vars
+            .contains(&("AGY_CLI_DISABLE_AUTO_UPDATE", "true")));
+        let qa_json = fs::read_to_string(sandbox.join("agy_qa_settings.json")).unwrap();
+        assert!(!qa_json.contains("edit_file(*)"));
 
         let codex_prep = build_invocation(CliKind::Codex, &cfg, "1+1=?", &sandbox).unwrap();
         assert!(!codex_prep.args.contains(&"--dangerously-bypass-approvals-and-sandbox".to_string()));
@@ -1110,6 +1125,9 @@ mod tests {
         let agy_free = build_invocation(CliKind::Agy, &free_cfg, "1+1=?", &sandbox).unwrap();
         assert!(agy_free.args.contains(&"--dangerously-skip-permissions".to_string()));
         assert!(!agy_free.args.contains(&"--sandbox".to_string()));
+        assert!(agy_free
+            .env_vars
+            .contains(&("AGY_CLI_DISABLE_AUTO_UPDATE", "true")));
 
         let codex_free = build_invocation(CliKind::Codex, &free_cfg, "1+1=?", &sandbox).unwrap();
         assert!(codex_free.args.contains(&"--dangerously-bypass-approvals-and-sandbox".to_string()));
