@@ -1295,7 +1295,11 @@ mod tests {
             SendMessageW(cmb_preset, CB_SETCURSEL, 1, 0);
             handle_command(hwnd, ID_CMB_TASK_PRESET, CBN_SELCHANGE);
             let cmb_lang = get_ctrl(hwnd, ID_CMB_TARGET_LANG);
-            SendMessageW(cmb_lang, CB_SETCURSEL, 2, 0);
+            let en_idx = TranslateTargetLang::all()
+                .iter()
+                .position(|&l| l == TranslateTargetLang::En)
+                .unwrap();
+            SendMessageW(cmb_lang, CB_SETCURSEL, en_idx, 0);
             handle_command(hwnd, ID_CMB_TARGET_LANG, CBN_SELCHANGE);
             assert!(get_ctrl_text(hwnd, ID_EDIT_PROMPT_PREFIX).contains("英文"));
 

@@ -146,6 +146,7 @@ impl TaskPreset {
 #[serde(rename_all = "snake_case")]
 pub enum TranslateTargetLang {
     AutoZhEn,
+    AutoZhJa,
     ZhCn,
     En,
     Ja,
@@ -162,9 +163,10 @@ impl Default for TranslateTargetLang {
 }
 
 impl TranslateTargetLang {
-    pub fn all() -> [Self; 8] {
+    pub fn all() -> [Self; 9] {
         [
             Self::AutoZhEn,
+            Self::AutoZhJa,
             Self::ZhCn,
             Self::En,
             Self::Ja,
@@ -178,6 +180,7 @@ impl TranslateTargetLang {
     pub fn short_name(self) -> &'static str {
         match self {
             Self::AutoZhEn => "中英互译",
+            Self::AutoZhJa => "中日互译",
             Self::ZhCn => "简体中文",
             Self::En => "英文",
             Self::Ja => "日文",
@@ -191,6 +194,7 @@ impl TranslateTargetLang {
     pub fn label(self) -> &'static str {
         match self {
             Self::AutoZhEn => "中英互译（中文→英文，外文→简体中文）",
+            Self::AutoZhJa => "中日互译（中文→日文，外文→简体中文）",
             Self::ZhCn => "简体中文",
             Self::En => "English（英文）",
             Self::Ja => "日本語（日文）",
@@ -203,7 +207,7 @@ impl TranslateTargetLang {
 
     fn prompt_target(self) -> &'static str {
         match self {
-            Self::AutoZhEn => "",
+            Self::AutoZhEn | Self::AutoZhJa => "",
             Self::ZhCn => "简体中文",
             Self::En => "自然地道的英文",
             Self::Ja => "自然地道的日文",
@@ -471,6 +475,9 @@ impl AppConfig {
                 TranslateTargetLang::AutoZhEn => {
                     "自动识别语言：中文译为自然英文，非中文译为简体中文。仅输出纯文本译文，无解释、无Markdown。".to_string()
                 }
+                TranslateTargetLang::AutoZhJa => {
+                    "自动识别语言：中文译为自然日文，非中文译为简体中文。仅输出纯文本译文，无解释、无Markdown。".to_string()
+                }
                 other => {
                     let t = other.prompt_target();
                     format!("自动识别源语言并翻译为{t}；若原文已是{t}则直接原样输出。仅输出纯文本结果，无解释、无Markdown。")
@@ -678,6 +685,10 @@ mod tests {
         cfg.translate_target_lang = TranslateTargetLang::AutoZhEn;
         assert!(cfg.effective_system_instruction().contains("中文译为自然英文"));
         assert_eq!(cfg.mode_badge(), "翻译→中英互译");
+
+        cfg.translate_target_lang = TranslateTargetLang::AutoZhJa;
+        assert!(cfg.effective_system_instruction().contains("自然日文"));
+        assert_eq!(cfg.mode_badge(), "翻译→中日互译");
 
         cfg.translate_target_lang = TranslateTargetLang::Ja;
         let ja_prompt = cfg.effective_system_instruction();
