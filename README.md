@@ -4,6 +4,9 @@
 
 # clip-ai
 
+[![CI](https://github.com/Zalafina/clip-ai/actions/workflows/ci.yml/badge.svg)](https://github.com/Zalafina/clip-ai/actions/workflows/ci.yml)
+[![Release](https://github.com/Zalafina/clip-ai/actions/workflows/release.yml/badge.svg)](https://github.com/Zalafina/clip-ai/actions/workflows/release.yml)
+
 一个轻量级、原生 Windows 无界面剪贴板 & 划词 AI 快速问答托盘工具（Rust + 原生 Win32 API，编译为单文件 `.exe`，零外部运行库依赖）。
 
 无需切换窗口，适合全屏游戏、阅读文档、浏览网页或专注编码时随时通过快捷键向本地已登录的 CLI AI Agent 提问，并将纯文本答案自动写回剪贴板。
@@ -40,8 +43,9 @@
 
 ## 快速使用
 
-1. 确保本机已安装并登录至少一个支持的 CLI 工具（`agy` / `codex` / `claude`，或配置自定义 CLI）。
-2. 启动 `clip-ai.exe` 后，任务栏托盘区会出现蓝色待机图标：
+1. 从 [GitHub Releases](https://github.com/Zalafina/clip-ai/releases) 下载最新 `clip-ai-*-x86_64-windows.zip` 并解压（或自行从源码构建）。
+2. 确保本机已安装并登录至少一个支持的 CLI 工具（`agy` / `codex` / `claude`，或配置自定义 CLI）。
+3. 启动 `clip-ai.exe` 后，任务栏托盘区会出现蓝色待机图标：
    - **提问**：鼠标划词高亮一段文本（或在仅剪贴板模式下先复制文本），按下 `Ctrl + Alt + Q`。
    - **等待**：听到开始提示音、图标变为橙色旋转动画；完成后听到完成提示音、图标变绿，答案已自动写入剪贴板可直接 `Ctrl + V` 粘贴。
    - **取消**：任务进行中按 `Ctrl + Alt + X` 即可立即中止。
@@ -73,6 +77,18 @@ cargo test live_agy_smoke_test -- --ignored --nocapture
 # 编译发布版单文件（输出至 target\release\clip-ai.exe）
 cargo build --release
 ```
+
+### 自动云端构建与发布（GitHub Actions）
+
+- 每次推送到 `main` 会自动触发 [CI](.github/workflows/ci.yml) 在 `windows-latest` 上运行全量测试与构建检查。
+- 推送语义化版本标签即可自动编译、打包 `.zip` 与 `SHA256SUMS.txt` 并发布至 [GitHub Releases](https://github.com/Zalafina/clip-ai/releases)：
+
+```powershell
+git tag v0.1.1
+git push origin v0.1.1
+```
+
+也可以在仓库的 **Actions → Release → Run workflow** 手动触发云端打包发布。
 
 ---
 
