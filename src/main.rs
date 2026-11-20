@@ -17,7 +17,10 @@ mod win_util;
 
 use crate::audio::{AudioPlayer, SoundCue};
 use crate::cli_runner::{run_with_fallback, CancelHandle, ExecutionOutcome};
-use crate::config::{is_autostart_registered, AppConfig, CliKind, HotkeySpec, InputSourceMode};
+use crate::config::{
+    is_autostart_registered, AppConfig, CliKind, HotkeySpec, InputSourceMode, TaskPreset,
+    TranslateTargetLang,
+};
 use crate::hotkey::{
     format_hotkey, register, unregister, HOTKEY_ID_CANCEL, HOTKEY_ID_TRIGGER,
 };
@@ -57,6 +60,8 @@ const MENU_EXIT: usize = 1004;
 const MENU_TOGGLE_PURE_QA: usize = 1005;
 const MENU_PROMOTE_BASE: usize = 1100;
 const MENU_INPUT_MODE_BASE: usize = 1200;
+const MENU_PRESET_BASE: usize = 1300;
+const MENU_LANG_BASE: usize = 1400;
 
 struct AppRuntime {
     hwnd: HWND,
@@ -543,13 +548,23 @@ unsafe fn show_tray_menu(hwnd: HWND) {
         return;
     }
 
-    let (status_line, is_running, sound_on, pure_qa_on, priority_list, trigger_label, input_mode) = APP.with(|cell| {
+    let (
+        status_line,
+        is_running,
+        sound_on,
+        pure_qa_on,
+        priority_list,
+        trigger_label,
+        input_mode,
+        task_preset,
+        target_lang,
+    ) = APP.with(|cell| {
         let borrow = cell.borrow();
         let app = borrow.as_ref().unwrap();
         let state = app.tray.current_state().label_zh();
         let primary = app.cfg.primary_backend().display_name();
-        let mode_short = app.cfg.input_mode.short_name();
-        let line = format!("clip-ai | {state} | {primary} | {mode_short}");
+        let badge = app.cfg.mode_badge();
+        let line = format!("clip-ai | {state} | {primary} | {badge}");
         (
             line,
             app.running_cancel.is_some(),
@@ -558,12 +573,50 @@ unsafe fn show_tray_menu(hwnd: HWND) {
             app.cfg.backend_priority.clone(),
             format_hotkey(app.cfg.trigger_hotkey),
             app.cfg.input_mode,
+            app.cfg.task_preset,
+            app.cfg.translate_target_lang,
         )
     });
 
     let header_w = to_wide(&format!("{status_line} ({trigger_label})"));
     AppendMenuW(menu, MF_STRING | MF_DISABLED | MF_GRAYED, 0, header_w.as_ptr());
     AppendMenuW(menu, MF_SEPARATOR, 0, std::ptr::null());
+
+    // Task preset submenu
+    let preset_sub = CreatePopupMenu();
+    for (idx, preset) in TaskPreset::all().into_iter().enumerate() {
+        let flag = if preset == task_preset {
+            MF_STRING | MF_CHECKED
+        } else {
+            MF_STRING
+        };
+        let w = to_wide(preset.label());
+        AppendMenuW(preset_sub, flag, MENU_PRESET_BASE + idx, w.as_ptr());
+    }
+    AppendMenuW(
+        menu,
+        MF_POPUP,
+        preset_sub as usize,
+        to_wide("功能模式").as_ptr(),
+    );
+
+    // Quick translate target language submenu (clicking also activates Translate mode)
+    let lang_sub = CreatePopupMenu();
+    for (idx, lang) in TranslateTargetLang::all().into_iter().enumerate() {
+        let flag = if task_preset == TaskPreset::Translate && lang == target_lang {
+            MF_STRING | MF_CHECKED
+        } else {
+            MF_STRING
+        };
+        let w = to_wide(lang.label());
+        AppendMenuW(lang_sub, flag, MENU_LANG_BASE + idx, w.as_ptr());
+    }
+    AppendMenuW(
+        menu,
+        MF_POPUP,
+        lang_sub as usize,
+        to_wide("翻译目标语言").as_ptr(),
+    );
 
     // Input source mode submenu
     let mode_sub = CreatePopupMenu();
@@ -682,6 +735,29 @@ unsafe fn handle_menu_command(hwnd: HWND, cmd: usize) {
                 }
             });
             logger::log_line("INFO", &format!("Input mode switched via tray to {}", mode.short_name()));
+        }
+        id if id >= MENU_PRESET_BASE && id < MENU_PRESET_BASE + TaskPreset::all().len() => {
+            let preset = TaskPreset::all()[id - MENU_PRESET_BASE];
+            APP.with(|cell| {
+                if let Some(app) = cell.borrow_mut().as_mut() {
+                    app.cfg.task_preset = preset;
+                    let _ = app.cfg.save();
+                }
+            });
+            logger::log_line("INFO", &format!("Task preset switched via tray to {}", preset.short_name()));
+        }
+        id if id >= MENU_LANG_BASE
+            && id < MENU_LANG_BASE + TranslateTargetLang::all().len() =>
+        {
+            let lang = TranslateTargetLang::all()[id - MENU_LANG_BASE];
+            APP.with(|cell| {
+                if let Some(app) = cell.borrow_mut().as_mut() {
+                    app.cfg.task_preset = TaskPreset::Translate;
+                    app.cfg.translate_target_lang = lang;
+                    let _ = app.cfg.save();
+                }
+            });
+            logger::log_line("INFO", &format!("Translate target switched via tray to {}", lang.short_name()));
         }
         _ => {}
     }

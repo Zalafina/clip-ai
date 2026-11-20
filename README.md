@@ -1,3 +1,7 @@
+<p align="center">
+  <img src="assets/clip-ai.png" alt="clip-ai icon" width="96" />
+</p>
+
 # clip-ai
 
 一个轻量级、原生 Windows 无界面剪贴板 & 划词 AI 快速问答托盘工具（Rust + 原生 Win32 API，编译为单文件 `.exe`，零外部运行库依赖）。
@@ -14,6 +18,9 @@
   - **智能混合（默认）**：优先通过 Windows UI Automation（`IUIAutomation` 焦点与鼠标指针单点探测）无侵入读取高亮划词；未命中且开启辅助取词且前台非终端窗口时，可使用受保护的 `Ctrl+C` 抓词（失败/取消时自动恢复原剪贴板）；仍无划词时回退读取剪贴板。
   - **仅剪贴板**：仅读取剪贴板文本，不探测前台窗口或发送任何模拟按键。
   - **仅划词高亮**：严格只通过 Windows UIA 读取当前高亮选区，**绝不触发 `Ctrl+C`，也绝不回退读取旧剪贴板**。
+- **多场景精炼提示词与智能翻译**（托盘右键菜单与设置窗口双端实时联动）
+  - 内置 **纯文本问答（默认）**、**智能翻译**、**提炼总结**、**润色改写**、**概念/代码解释** 与 **自定义提示词**。
+  - **智能翻译**：自动识别源语言并翻译为用户选定的目标语言（支持 `中英互译`、`简体中文`、`English`、`日本語`、`한국어`、`繁體中文`、`Français`、`Deutsch`）；若输入语言已与目标语言一致则原样输出纯文本；在托盘右键“翻译目标语言”点击任意语言即可一键切入翻译模式。
 - **纯文本安全问答模式（默认开启）**
   - 从 CLI 参数与 `<user_input>` 定界层硬性禁止调用本地工具、终端命令及文件读写（`agy` 启用 `--sandbox` + 会话级 `permissions.deny`；`codex` 强制 `-s read-only` + `--disable shell_tool/unified_exec/apps` + `mcp_servers={}`；`claude` 启用 `--tools "" --strict-mcp-config --permission-mode dontAsk`）。
   - 可在设置或托盘菜单随时关闭该开关，恢复自由 Agent 模式。

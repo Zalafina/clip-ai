@@ -11,7 +11,7 @@ use windows_sys::Win32::System::Registry::{
     HKEY_CURRENT_USER, KEY_READ, KEY_WRITE, REG_SZ,
 };
 
-pub const DEFAULT_SYSTEM_INSTRUCTION: &str = "请直接以纯文本形式一次性给出最终回答，不要使用复杂 Markdown 格式（避免标题符号、加粗、表格和多余装饰），不要制定需要确认的计划，不要提问反问，也不要调用修改文件或终端工具。";
+pub const DEFAULT_SYSTEM_INSTRUCTION: &str = "直接用简洁纯文本一次性回答问题，不用Markdown，不反问。";
 
 const MOD_ALT: u32 = 0x0001;
 const MOD_CONTROL: u32 = 0x0002;
@@ -86,6 +86,131 @@ impl InputSourceMode {
             Self::SmartHybrid => "智能混合（优先划词，无划词回退剪贴板）",
             Self::ClipboardOnly => "仅剪贴板",
             Self::SelectionOnly => "仅划词高亮（仅 UIA，不触发 Ctrl+C）",
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum TaskPreset {
+    Qa,
+    Translate,
+    Summarize,
+    Polish,
+    Explain,
+    Custom,
+}
+
+impl Default for TaskPreset {
+    fn default() -> Self {
+        Self::Qa
+    }
+}
+
+impl TaskPreset {
+    pub fn all() -> [Self; 6] {
+        [
+            Self::Qa,
+            Self::Translate,
+            Self::Summarize,
+            Self::Polish,
+            Self::Explain,
+            Self::Custom,
+        ]
+    }
+
+    pub fn short_name(self) -> &'static str {
+        match self {
+            Self::Qa => "问答",
+            Self::Translate => "翻译",
+            Self::Summarize => "总结",
+            Self::Polish => "润色",
+            Self::Explain => "解释",
+            Self::Custom => "自定义",
+        }
+    }
+
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::Qa => "纯文本问答（默认）",
+            Self::Translate => "智能翻译（自动识别源语言）",
+            Self::Summarize => "提炼总结",
+            Self::Polish => "润色改写",
+            Self::Explain => "概念/代码解释",
+            Self::Custom => "自定义提示词",
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum TranslateTargetLang {
+    AutoZhEn,
+    ZhCn,
+    En,
+    Ja,
+    Ko,
+    ZhTw,
+    Fr,
+    De,
+}
+
+impl Default for TranslateTargetLang {
+    fn default() -> Self {
+        Self::AutoZhEn
+    }
+}
+
+impl TranslateTargetLang {
+    pub fn all() -> [Self; 8] {
+        [
+            Self::AutoZhEn,
+            Self::ZhCn,
+            Self::En,
+            Self::Ja,
+            Self::Ko,
+            Self::ZhTw,
+            Self::Fr,
+            Self::De,
+        ]
+    }
+
+    pub fn short_name(self) -> &'static str {
+        match self {
+            Self::AutoZhEn => "中英互译",
+            Self::ZhCn => "简体中文",
+            Self::En => "英文",
+            Self::Ja => "日文",
+            Self::Ko => "韩文",
+            Self::ZhTw => "繁体中文",
+            Self::Fr => "法语",
+            Self::De => "德语",
+        }
+    }
+
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::AutoZhEn => "中英互译（中文→英文，外文→简体中文）",
+            Self::ZhCn => "简体中文",
+            Self::En => "English（英文）",
+            Self::Ja => "日本語（日文）",
+            Self::Ko => "한국어（韩文）",
+            Self::ZhTw => "繁體中文",
+            Self::Fr => "Français（法语）",
+            Self::De => "Deutsch（德语）",
+        }
+    }
+
+    fn prompt_target(self) -> &'static str {
+        match self {
+            Self::AutoZhEn => "",
+            Self::ZhCn => "简体中文",
+            Self::En => "自然地道的英文",
+            Self::Ja => "自然地道的日文",
+            Self::Ko => "自然地道的韩文",
+            Self::ZhTw => "繁體中文",
+            Self::Fr => "自然地道的法语",
+            Self::De => "自然地道的德语",
         }
     }
 }
@@ -190,6 +315,8 @@ impl Default for CustomCliConfig {
 pub struct AppConfig {
     pub input_mode: InputSourceMode,
     pub hybrid_ctrl_c_fallback: bool,
+    pub task_preset: TaskPreset,
+    pub translate_target_lang: TranslateTargetLang,
     pub backend_priority: Vec<BackendEntry>,
     pub enable_fallback: bool,
     pub pure_text_qa_mode: bool,
@@ -232,6 +359,8 @@ impl Default for AppConfig {
         Self {
             input_mode: InputSourceMode::SmartHybrid,
             hybrid_ctrl_c_fallback: true,
+            task_preset: TaskPreset::Qa,
+            translate_target_lang: TranslateTargetLang::AutoZhEn,
             backend_priority: vec![
                 BackendEntry {
                     kind: CliKind::Agy,
@@ -332,6 +461,47 @@ impl AppConfig {
             .find(|e| e.enabled)
             .map(|e| e.kind)
             .unwrap_or(CliKind::Agy)
+    }
+
+    /// Generate the concise instruction prompt for a built-in preset and translation target language.
+    pub fn preset_instruction(preset: TaskPreset, lang: TranslateTargetLang) -> Option<String> {
+        match preset {
+            TaskPreset::Qa => Some(DEFAULT_SYSTEM_INSTRUCTION.to_string()),
+            TaskPreset::Translate => Some(match lang {
+                TranslateTargetLang::AutoZhEn => {
+                    "自动识别语言：中文译为自然英文，非中文译为简体中文。仅输出纯文本译文，无解释、无Markdown。".to_string()
+                }
+                other => {
+                    let t = other.prompt_target();
+                    format!("自动识别源语言并翻译为{t}；若原文已是{t}则直接原样输出。仅输出纯文本结果，无解释、无Markdown。")
+                }
+            }),
+            TaskPreset::Summarize => {
+                Some("将内容提炼为简洁的纯文本要点，不添废话，不用Markdown。".to_string())
+            }
+            TaskPreset::Polish => {
+                Some("保持原意和原语言，润色语句使其更自然流畅。仅输出修改后纯文本，无解释、无Markdown。".to_string())
+            }
+            TaskPreset::Explain => {
+                Some("用简明通俗的纯文本解释概念、报错或代码含义，不用Markdown。".to_string())
+            }
+            TaskPreset::Custom => None,
+        }
+    }
+
+    /// Resolve the active instruction text based on `task_preset` and `translate_target_lang`.
+    pub fn effective_system_instruction(&self) -> String {
+        Self::preset_instruction(self.task_preset, self.translate_target_lang)
+            .unwrap_or_else(|| self.system_instruction.trim().to_string())
+    }
+
+    /// Short status badge for the tray menu header (e.g. `问答` or `翻译→英文`).
+    pub fn mode_badge(&self) -> String {
+        if self.task_preset == TaskPreset::Translate {
+            format!("翻译→{}", self.translate_target_lang.short_name())
+        } else {
+            self.task_preset.short_name().to_string()
+        }
     }
 
     pub fn config_path() -> PathBuf {
@@ -495,7 +665,24 @@ mod tests {
         assert_eq!(cfg.input_mode, InputSourceMode::SmartHybrid);
         assert!(cfg.hybrid_ctrl_c_fallback);
         assert!(cfg.pure_text_qa_mode);
+        assert_eq!(cfg.task_preset, TaskPreset::Qa);
+        assert_eq!(cfg.translate_target_lang, TranslateTargetLang::AutoZhEn);
         assert!(!cfg.enable_fallback);
         assert_eq!(cfg.sound_volume, 50);
+    }
+
+    #[test]
+    fn translate_preset_updates_prompt_and_handles_same_language_input() {
+        let mut cfg = AppConfig::default();
+        cfg.task_preset = TaskPreset::Translate;
+        cfg.translate_target_lang = TranslateTargetLang::AutoZhEn;
+        assert!(cfg.effective_system_instruction().contains("中文译为自然英文"));
+        assert_eq!(cfg.mode_badge(), "翻译→中英互译");
+
+        cfg.translate_target_lang = TranslateTargetLang::Ja;
+        let ja_prompt = cfg.effective_system_instruction();
+        assert!(ja_prompt.contains("日文"));
+        assert!(ja_prompt.contains("原样输出"));
+        assert_eq!(cfg.mode_badge(), "翻译→日文");
     }
 }

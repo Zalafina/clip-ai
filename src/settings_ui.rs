@@ -4,7 +4,8 @@
 use crate::audio::{AudioPlayer, SoundCue};
 use crate::cli_runner::{detect_all_backends, BackendDetection};
 use crate::config::{
-    apply_autostart, AppConfig, CliKind, HotkeySpec, InputSourceMode, DEFAULT_SYSTEM_INSTRUCTION,
+    apply_autostart, AppConfig, CliKind, HotkeySpec, InputSourceMode, TaskPreset,
+    TranslateTargetLang, DEFAULT_SYSTEM_INSTRUCTION,
 };
 use crate::hotkey::{format_hotkey, is_modifier_vk, probe_conflict};
 use crate::logger;
@@ -27,16 +28,16 @@ use windows_sys::Win32::UI::Input::KeyboardAndMouse::{
 };
 use windows_sys::Win32::UI::WindowsAndMessaging::{
     CallWindowProcW, CreateWindowExW, DefWindowProcW, DestroyWindow, GetClientRect,
-    GetSystemMetrics, GetWindowLongPtrW, GetWindowTextLengthW, GetWindowTextW, MessageBoxW,
-    PostMessageW, RegisterClassW, SendMessageW, SetForegroundWindow, SetWindowLongPtrW,
-    SetWindowTextW, ShowWindow, BM_GETCHECK, BM_SETCHECK, BS_AUTOCHECKBOX, BS_DEFPUSHBUTTON,
-    BS_GROUPBOX, BS_PUSHBUTTON, CB_ADDSTRING, CB_GETCURSEL, CB_SETCURSEL, CBN_SELCHANGE,
-    CBS_DROPDOWNLIST, EN_CHANGE, ES_AUTOHSCROLL, ES_AUTOVSCROLL, ES_MULTILINE, ES_READONLY,
-    GWLP_USERDATA, GWLP_WNDPROC, LB_ADDSTRING, LB_GETCURSEL, LB_RESETCONTENT, LB_SETCURSEL,
-    LBN_SELCHANGE, MB_ICONWARNING, MB_OK, SM_CXSCREEN, SM_CYSCREEN, SW_RESTORE, SW_SHOW, WM_CLOSE,
-    WM_COMMAND, WM_CREATE, WM_DESTROY, WM_KEYDOWN, WM_SETFONT, WM_SYSKEYDOWN, WNDCLASSW, WNDPROC,
-    WS_BORDER, WS_CAPTION, WS_CHILD, WS_CLIPCHILDREN, WS_EX_CONTROLPARENT, WS_MINIMIZEBOX,
-    WS_OVERLAPPED, WS_SYSMENU, WS_TABSTOP, WS_VISIBLE, WS_VSCROLL,
+    GetSystemMetrics, GetWindowLongPtrW, GetWindowTextLengthW, GetWindowTextW, LoadIconW,
+    MessageBoxW, PostMessageW, RegisterClassW, SendMessageW, SetForegroundWindow,
+    SetWindowLongPtrW, SetWindowTextW, ShowWindow, BM_GETCHECK, BM_SETCHECK, BS_AUTOCHECKBOX,
+    BS_DEFPUSHBUTTON, BS_GROUPBOX, BS_PUSHBUTTON, CB_ADDSTRING, CB_GETCURSEL, CB_SETCURSEL,
+    CBN_SELCHANGE, CBS_DROPDOWNLIST, EN_CHANGE, ES_AUTOHSCROLL, ES_AUTOVSCROLL, ES_MULTILINE,
+    ES_READONLY, GWLP_USERDATA, GWLP_WNDPROC, LB_ADDSTRING, LB_GETCURSEL, LB_RESETCONTENT,
+    LB_SETCURSEL, LBN_SELCHANGE, MB_ICONWARNING, MB_OK, SM_CXSCREEN, SM_CYSCREEN, SW_RESTORE,
+    SW_SHOW, WM_CLOSE, WM_COMMAND, WM_CREATE, WM_DESTROY, WM_KEYDOWN, WM_SETFONT, WM_SYSKEYDOWN,
+    WNDCLASSW, WNDPROC, WS_BORDER, WS_CAPTION, WS_CHILD, WS_CLIPCHILDREN, WS_EX_CONTROLPARENT,
+    WS_MINIMIZEBOX, WS_OVERLAPPED, WS_SYSMENU, WS_TABSTOP, WS_VISIBLE, WS_VSCROLL,
 };
 
 pub const WM_APP_CONFIG_SAVED: u32 = 0x8000 + 20;
@@ -82,6 +83,8 @@ const ID_BTN_TEST_SOUND: i32 = 310;
 
 const ID_EDIT_PROMPT_PREFIX: i32 = 401;
 const ID_BTN_RESET_PROMPT: i32 = 402;
+const ID_CMB_TASK_PRESET: i32 = 403;
+const ID_CMB_TARGET_LANG: i32 = 404;
 const ID_EDIT_DIAGNOSTICS: i32 = 501;
 const ID_BTN_OPEN_LOG: i32 = 502;
 
@@ -152,6 +155,7 @@ pub fn open_or_focus(
 
     unsafe {
         let hinst = GetModuleHandleW(std::ptr::null()) as HINSTANCE;
+        let app_icon = LoadIconW(hinst, 1 as *const u16);
         let class_name = to_wide("ClipAISettingsWindow");
         let wc = WNDCLASSW {
             style: 0,
@@ -159,7 +163,7 @@ pub fn open_or_focus(
             cbClsExtra: 0,
             cbWndExtra: 0,
             hInstance: hinst,
-            hIcon: std::ptr::null_mut(),
+            hIcon: app_icon,
             hCursor: std::ptr::null_mut(),
             hbrBackground: 16 as _, // COLOR_BTNFACE + 1
             lpszMenuName: std::ptr::null(),
@@ -169,7 +173,7 @@ pub fn open_or_focus(
 
         let dpi = windows_sys::Win32::UI::HiDpi::GetDpiForSystem();
         let w = mul_dpi(720, dpi);
-        let h = mul_dpi(795, dpi);
+        let h = mul_dpi(825, dpi);
         let sx = GetSystemMetrics(SM_CXSCREEN);
         let sy = GetSystemMetrics(SM_CYSCREEN);
         let x = ((sx - w) / 2).max(0);
@@ -340,7 +344,7 @@ unsafe fn build_controls(hwnd: HWND) {
 
     // 3. Audio, Output & Prompt Group
     y += s(254);
-    create_ctrl(hwnd, hinst, hfont, "BUTTON", "提示音、输出清理与日常问答引导语", WS_CHILD | WS_VISIBLE | BS_GROUPBOX as u32, margin, y, gw, s(196), 0);
+    create_ctrl(hwnd, hinst, hfont, "BUTTON", "提示音、输出清理与功能模式提示词", WS_CHILD | WS_VISIBLE | BS_GROUPBOX as u32, margin, y, gw, s(226), 0);
     create_ctrl(hwnd, hinst, hfont, "BUTTON", "启用提示音", WS_CHILD | WS_VISIBLE | WS_TABSTOP | BS_AUTOCHECKBOX as u32, margin + s(12), y + s(24), s(104), s(22), ID_CHK_SOUND);
     create_ctrl(hwnd, hinst, hfont, "STATIC", "音量(0-100):", WS_CHILD | WS_VISIBLE, margin + s(124), y + s(26), s(86), s(20), 0);
     create_ctrl(hwnd, hinst, hfont, "EDIT", "", WS_CHILD | WS_VISIBLE | WS_BORDER | WS_TABSTOP | ES_AUTOHSCROLL as u32, margin + s(212), y + s(23), s(46), s(24), ID_EDIT_VOLUME);
@@ -361,12 +365,25 @@ unsafe fn build_controls(hwnd: HWND) {
     create_ctrl(hwnd, hinst, hfont, "BUTTON", "轻量清理常见 Markdown 符号（保留代码内容）", WS_CHILD | WS_VISIBLE | WS_TABSTOP | BS_AUTOCHECKBOX as u32, margin + s(12), y + s(86), s(340), s(22), ID_CHK_STRIP_MD);
     create_ctrl(hwnd, hinst, hfont, "BUTTON", "开机自启动 (Windows 登录时静默启动)", WS_CHILD | WS_VISIBLE | WS_TABSTOP | BS_AUTOCHECKBOX as u32, margin + s(360), y + s(86), s(290), s(22), ID_CHK_AUTOSTART);
 
-    create_ctrl(hwnd, hinst, hfont, "STATIC", "问答约束引导语:", WS_CHILD | WS_VISIBLE, margin + s(12), y + s(116), s(110), s(20), 0);
-    create_ctrl(hwnd, hinst, hfont, "BUTTON", "恢复默认", WS_CHILD | WS_VISIBLE | WS_TABSTOP | BS_PUSHBUTTON as u32, margin + s(12), y + s(142), s(88), s(24), ID_BTN_RESET_PROMPT);
-    create_ctrl(hwnd, hinst, hfont, "EDIT", "", WS_CHILD | WS_VISIBLE | WS_BORDER | WS_TABSTOP | WS_VSCROLL | ES_MULTILINE as u32 | ES_AUTOVSCROLL as u32, margin + s(116), y + s(114), gw - s(128), s(68), ID_EDIT_PROMPT_PREFIX);
+    create_ctrl(hwnd, hinst, hfont, "STATIC", "功能模式:", WS_CHILD | WS_VISIBLE, margin + s(12), y + s(116), s(68), s(20), 0);
+    let cmb_preset = create_ctrl(hwnd, hinst, hfont, "COMBOBOX", "", WS_CHILD | WS_VISIBLE | WS_TABSTOP | CBS_DROPDOWNLIST as u32, margin + s(82), y + s(113), s(220), s(170), ID_CMB_TASK_PRESET);
+    for preset in TaskPreset::all() {
+        let wl = to_wide(preset.label());
+        SendMessageW(cmb_preset, CB_ADDSTRING, 0, wl.as_ptr() as LPARAM);
+    }
+    create_ctrl(hwnd, hinst, hfont, "STATIC", "翻译目标语言:", WS_CHILD | WS_VISIBLE, margin + s(314), y + s(116), s(90), s(20), 0);
+    let cmb_lang = create_ctrl(hwnd, hinst, hfont, "COMBOBOX", "", WS_CHILD | WS_VISIBLE | WS_TABSTOP | CBS_DROPDOWNLIST as u32, margin + s(406), y + s(113), gw - s(418), s(200), ID_CMB_TARGET_LANG);
+    for lang in TranslateTargetLang::all() {
+        let wl = to_wide(lang.label());
+        SendMessageW(cmb_lang, CB_ADDSTRING, 0, wl.as_ptr() as LPARAM);
+    }
+
+    create_ctrl(hwnd, hinst, hfont, "STATIC", "生效提示词:", WS_CHILD | WS_VISIBLE, margin + s(12), y + s(148), s(96), s(20), 0);
+    create_ctrl(hwnd, hinst, hfont, "BUTTON", "恢复默认", WS_CHILD | WS_VISIBLE | WS_TABSTOP | BS_PUSHBUTTON as u32, margin + s(12), y + s(174), s(88), s(24), ID_BTN_RESET_PROMPT);
+    create_ctrl(hwnd, hinst, hfont, "EDIT", "", WS_CHILD | WS_VISIBLE | WS_BORDER | WS_TABSTOP | WS_VSCROLL | ES_MULTILINE as u32 | ES_AUTOVSCROLL as u32, margin + s(116), y + s(146), gw - s(128), s(68), ID_EDIT_PROMPT_PREFIX);
 
     // 4. Diagnostics Group
-    y += s(204);
+    y += s(234);
     create_ctrl(hwnd, hinst, hfont, "BUTTON", "最近一次运行状态与诊断", WS_CHILD | WS_VISIBLE | BS_GROUPBOX as u32, margin, y, gw, s(88), 0);
     create_ctrl(hwnd, hinst, hfont, "EDIT", "", WS_CHILD | WS_VISIBLE | WS_BORDER | WS_VSCROLL | ES_MULTILINE as u32 | ES_AUTOVSCROLL as u32 | ES_READONLY as u32, margin + s(12), y + s(22), gw - s(116), s(54), ID_EDIT_DIAGNOSTICS);
     create_ctrl(hwnd, hinst, hfont, "BUTTON", "打开日志", WS_CHILD | WS_VISIBLE | WS_TABSTOP | BS_PUSHBUTTON as u32, margin + gw - s(96), y + s(22), s(84), s(26), ID_BTN_OPEN_LOG);
@@ -535,7 +552,9 @@ struct InitSnapshot {
     timeout_secs: String,
     strip_markdown: bool,
     autostart: bool,
-    system_instruction: String,
+    preset_idx: usize,
+    target_lang_idx: usize,
+    effective_instruction: String,
     diag_text: String,
     selected_wav_idx: usize,
 }
@@ -559,6 +578,14 @@ unsafe fn populate_all_fields(hwnd: HWND) {
             .iter()
             .position(|&m| m == st.draft.input_mode)
             .unwrap_or(0);
+        let preset_idx = TaskPreset::all()
+            .iter()
+            .position(|&p| p == st.draft.task_preset)
+            .unwrap_or(0);
+        let target_lang_idx = TranslateTargetLang::all()
+            .iter()
+            .position(|&l| l == st.draft.translate_target_lang)
+            .unwrap_or(0);
         Some(InitSnapshot {
             trigger_text: format_hotkey(st.draft.trigger_hotkey),
             cancel_text: st
@@ -577,7 +604,9 @@ unsafe fn populate_all_fields(hwnd: HWND) {
             timeout_secs: st.draft.timeout_secs.to_string(),
             strip_markdown: st.draft.strip_markdown,
             autostart: st.draft.autostart,
-            system_instruction: st.draft.system_instruction.clone(),
+            preset_idx,
+            target_lang_idx,
+            effective_instruction: st.draft.effective_system_instruction(),
             diag_text,
             selected_wav_idx: st.selected_wav_idx,
         })
@@ -609,7 +638,13 @@ unsafe fn populate_all_fields(hwnd: HWND) {
     set_ctrl_text(hwnd, ID_EDIT_TIMEOUT, &s.timeout_secs);
     set_check(hwnd, ID_CHK_STRIP_MD, s.strip_markdown);
     set_check(hwnd, ID_CHK_AUTOSTART, s.autostart);
-    set_ctrl_text(hwnd, ID_EDIT_PROMPT_PREFIX, &s.system_instruction);
+    SendMessageW(get_ctrl(hwnd, ID_CMB_TASK_PRESET), CB_SETCURSEL, s.preset_idx, 0);
+    SendMessageW(get_ctrl(hwnd, ID_CMB_TARGET_LANG), CB_SETCURSEL, s.target_lang_idx, 0);
+    EnableWindow(
+        get_ctrl(hwnd, ID_CMB_TARGET_LANG),
+        (s.preset_idx == 1) as i32,
+    );
+    set_ctrl_text(hwnd, ID_EDIT_PROMPT_PREFIX, &s.effective_instruction);
     set_ctrl_text(hwnd, ID_EDIT_DIAGNOSTICS, &s.diag_text);
     SendMessageW(get_ctrl(hwnd, ID_CMB_WAV_CUE), CB_SETCURSEL, s.selected_wav_idx, 0);
     SUPPRESS_EVENTS.set(false);
@@ -911,8 +946,105 @@ unsafe fn handle_command(hwnd: HWND, id: i32, code: u32) {
                 }
             });
         }
+        ID_CMB_TASK_PRESET if code == CBN_SELCHANGE => {
+            if SUPPRESS_EVENTS.get() {
+                return;
+            }
+            let sel = SendMessageW(get_ctrl(hwnd, ID_CMB_TASK_PRESET), CB_GETCURSEL, 0, 0);
+            if sel >= 0 {
+                if let Some(&preset) = TaskPreset::all().get(sel as usize) {
+                    let next_prompt = SETTINGS_STATE.with(|cell| {
+                        let mut borrow = cell.borrow_mut();
+                        let st = borrow.as_mut()?;
+                        st.draft.task_preset = preset;
+                        Some(st.draft.effective_system_instruction())
+                    });
+                    EnableWindow(
+                        get_ctrl(hwnd, ID_CMB_TARGET_LANG),
+                        (preset == TaskPreset::Translate) as i32,
+                    );
+                    if let Some(p) = next_prompt {
+                        SUPPRESS_EVENTS.set(true);
+                        set_ctrl_text(hwnd, ID_EDIT_PROMPT_PREFIX, &p);
+                        SUPPRESS_EVENTS.set(false);
+                    }
+                }
+            }
+        }
+        ID_CMB_TARGET_LANG if code == CBN_SELCHANGE => {
+            if SUPPRESS_EVENTS.get() {
+                return;
+            }
+            let sel = SendMessageW(get_ctrl(hwnd, ID_CMB_TARGET_LANG), CB_GETCURSEL, 0, 0);
+            if sel >= 0 {
+                if let Some(&lang) = TranslateTargetLang::all().get(sel as usize) {
+                    let next_prompt = SETTINGS_STATE.with(|cell| {
+                        let mut borrow = cell.borrow_mut();
+                        let st = borrow.as_mut()?;
+                        st.draft.translate_target_lang = lang;
+                        Some(st.draft.effective_system_instruction())
+                    });
+                    if let Some(p) = next_prompt {
+                        SUPPRESS_EVENTS.set(true);
+                        set_ctrl_text(hwnd, ID_EDIT_PROMPT_PREFIX, &p);
+                        SUPPRESS_EVENTS.set(false);
+                    }
+                }
+            }
+        }
+        ID_EDIT_PROMPT_PREFIX if code == EN_CHANGE => {
+            if SUPPRESS_EVENTS.get() {
+                return;
+            }
+            let edited = get_ctrl_text(hwnd, ID_EDIT_PROMPT_PREFIX);
+            let switched_to_custom = SETTINGS_STATE.with(|cell| {
+                let mut borrow = cell.borrow_mut();
+                let Some(st) = borrow.as_mut() else {
+                    return false;
+                };
+                st.draft.system_instruction = edited;
+                if st.draft.task_preset != TaskPreset::Custom {
+                    st.draft.task_preset = TaskPreset::Custom;
+                    return true;
+                }
+                false
+            });
+            if switched_to_custom {
+                let custom_idx = TaskPreset::all()
+                    .iter()
+                    .position(|&p| p == TaskPreset::Custom)
+                    .unwrap_or(5);
+                SUPPRESS_EVENTS.set(true);
+                SendMessageW(get_ctrl(hwnd, ID_CMB_TASK_PRESET), CB_SETCURSEL, custom_idx, 0);
+                EnableWindow(get_ctrl(hwnd, ID_CMB_TARGET_LANG), 0);
+                SUPPRESS_EVENTS.set(false);
+            }
+        }
         ID_BTN_RESET_PROMPT => {
-            set_ctrl_text(hwnd, ID_EDIT_PROMPT_PREFIX, DEFAULT_SYSTEM_INSTRUCTION);
+            let (reset_text, preset_idx, is_translate) = SETTINGS_STATE.with(|cell| {
+                let mut borrow = cell.borrow_mut();
+                let Some(st) = borrow.as_mut() else {
+                    return (DEFAULT_SYSTEM_INSTRUCTION.to_string(), 0usize, false);
+                };
+                if st.draft.task_preset == TaskPreset::Custom {
+                    st.draft.task_preset = TaskPreset::Qa;
+                    st.draft.system_instruction = DEFAULT_SYSTEM_INSTRUCTION.to_string();
+                }
+                let idx = TaskPreset::all()
+                    .iter()
+                    .position(|&p| p == st.draft.task_preset)
+                    .unwrap_or(0);
+                (
+                    st.draft.effective_system_instruction(),
+                    idx,
+                    st.draft.task_preset == TaskPreset::Translate,
+                )
+            });
+            SUPPRESS_EVENTS.set(true);
+            SendMessageW(get_ctrl(hwnd, ID_CMB_TASK_PRESET), CB_SETCURSEL, preset_idx, 0);
+            EnableWindow(get_ctrl(hwnd, ID_CMB_TARGET_LANG), is_translate as i32);
+            set_ctrl_text(hwnd, ID_EDIT_PROMPT_PREFIX, &reset_text);
+            SUPPRESS_EVENTS.set(false);
         }
         ID_BTN_OPEN_LOG => {
             let path = logger::log_path();
@@ -975,6 +1107,8 @@ unsafe fn save_and_close(hwnd: HWND) {
     let timeout_text = get_ctrl_text(hwnd, ID_EDIT_TIMEOUT);
     let strip_markdown = get_check(hwnd, ID_CHK_STRIP_MD);
     let autostart = get_check(hwnd, ID_CHK_AUTOSTART);
+    let preset_sel = SendMessageW(get_ctrl(hwnd, ID_CMB_TASK_PRESET), CB_GETCURSEL, 0, 0);
+    let lang_sel = SendMessageW(get_ctrl(hwnd, ID_CMB_TARGET_LANG), CB_GETCURSEL, 0, 0);
     let system_instruction = get_ctrl_text(hwnd, ID_EDIT_PROMPT_PREFIX);
 
     let result: Result<(AppConfig, HWND), String> = (|| {
@@ -1016,7 +1150,15 @@ unsafe fn save_and_close(hwnd: HWND) {
         cfg.timeout_secs = timeout;
         cfg.strip_markdown = strip_markdown;
         cfg.autostart = autostart;
-        cfg.system_instruction = system_instruction;
+        if let Some(&preset) = TaskPreset::all().get(preset_sel.max(0) as usize) {
+            cfg.task_preset = preset;
+        }
+        if let Some(&lang) = TranslateTargetLang::all().get(lang_sel.max(0) as usize) {
+            cfg.translate_target_lang = lang;
+        }
+        if cfg.task_preset == TaskPreset::Custom {
+            cfg.system_instruction = system_instruction;
+        }
 
         if !cfg.backend_priority.iter().any(|e| e.enabled) {
             return Err("请至少启用一个 CLI 后端".to_string());
@@ -1148,6 +1290,14 @@ mod tests {
             handle_command(hwnd, ID_CMB_INPUT_MODE, CBN_SELCHANGE);
             SendMessageW(cmb_mode, CB_SETCURSEL, 0, 0);
             handle_command(hwnd, ID_CMB_INPUT_MODE, CBN_SELCHANGE);
+
+            let cmb_preset = get_ctrl(hwnd, ID_CMB_TASK_PRESET);
+            SendMessageW(cmb_preset, CB_SETCURSEL, 1, 0);
+            handle_command(hwnd, ID_CMB_TASK_PRESET, CBN_SELCHANGE);
+            let cmb_lang = get_ctrl(hwnd, ID_CMB_TARGET_LANG);
+            SendMessageW(cmb_lang, CB_SETCURSEL, 2, 0);
+            handle_command(hwnd, ID_CMB_TARGET_LANG, CBN_SELCHANGE);
+            assert!(get_ctrl_text(hwnd, ID_EDIT_PROMPT_PREFIX).contains("英文"));
 
             let mut msg: MSG = std::mem::zeroed();
             while PeekMessageW(&mut msg, hwnd, 0, 0, PM_REMOVE) != 0 {
